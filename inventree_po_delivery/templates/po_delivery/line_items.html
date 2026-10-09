@@ -1,0 +1,284 @@
+{% comment %}
+Adds a "Delivered" / "Not Delivered" indicator to the rows of the Line Items
+table on the Purchase Order page (below the "Received" progress bar).
+
+InvenTree has no plugin hook for adding columns to its own tables, so this
+script (loaded on every page by the shared favicon.html override) watches the
+page for that table and adds the indicators to its rows:
+
+- The line item shown in each row is read from the props which the table
+  (mantine-datatable) passes to each cell: "record" and "accessor". If this ever
+  stops working (e.g. after an InvenTree upgrade), the indicators are simply
+  not shown - nothing else in the table is changed.
+- The delivery state comes from the plugin API (/plugin/podelivery/lines/).
+  It is re-fetched when switching tabs, when returning to the browser window,
+  and after a change in the plugin's "Deliveries" panel.
+{% endcomment %}
+<style>
+  .po-delivery-indicator {
+    margin-top: 4px;
+  }
+
+  .po-delivery-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 8px;
+    border-radius: 1000px;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 18px;
+    white-space: nowrap;
+    text-transform: uppercase;
+    letter-spacing: 0.25px;
+  }
+
+  .po-delivery-badge svg {
+    width: 12px;
+    height: 12px;
+    flex: none;
+  }
+
+  .po-delivery-badge[data-state="delivered"] {
+    background: var(--mantine-color-green-light, #ebfbee);
+    color: var(--mantine-color-green-light-color, #2f9e44);
+  }
+
+  .po-delivery-badge[data-state="awaiting"] {
+    background: var(--mantine-color-gray-light, #f1f3f5);
+    color: var(--mantine-color-gray-light-color, #495057);
+  }
+</style>
+<script>
+  (() => {
+    // Purchase Order page: /<base>/purchasing/purchase-order/<pk>/...
+    const ORDER_PATH = /\/purchasing\/purchase-order\/(\d+)(?:\/|$)/;
+
+    // Delivery data older than this is re-fetched (ms)
+    const MAX_AGE = 30000;
+
+    // Columns to show the indicator in (first one which is visible)
+    const COLUMNS = ['received', 'quantity'];
+
+    const svg = (paths) =>
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      paths.map((d) => `<path d="${d}"/>`).join('') +
+      '</svg>';
+
+    const ICONS = {
+      delivered: svg([
+        'M5 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0',
+        'M15 17a2 2 0 1 0 4 0a2 2 0 1 0 -4 0',
+        'M5 17h-2v-4m-1 -8h11v12m-4 0h6m4 0h2v-6h-8m0 -5h5l3 5',
+        'M3 9l4 0'
+      ]),
+      awaiting: svg(['M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0', 'M12 7v5l3 3'])
+    };
+
+    // Delivery data for the current order: {orderId, path, time, lines: {pk: row}}
+    let cache = { orderId: null, path: null, time: 0, lines: null };
+    let loading = false;
+    let scheduled = false;
+
+    const apiUrl = (path) => {
+      const host = (window.INVENTREE_SETTINGS && window.INVENTREE_SETTINGS.api_host) || '';
+      return host.replace(/\/+$/, '') + path;
+    };
+
+    // Return the props of the nearest React component (at or above the element) which pass the test
+    const reactProps = (element, test, depth) => {
+      const key = Object.keys(element).find((k) => k.startsWith('__reactFiber$'));
+      let fiber = key ? element[key] : null;
+
+      for (let i = 0; fiber && i < depth; i++, fiber = fiber.return) {
+        const props = fiber.memoizedProps;
+
+        if (props && typeof props === 'object' && test(props)) {
+          return props;
+        }
+      }
+
+      return null;
+    };
+
+    // Return {record, accessor} for a table cell, or null
+    const cellInfo = (cell) =>
+      reactProps(
+        cell,
+        (props) =>
+          typeof props.accessor === 'string' && props.record && typeof props.record === 'object',
+        12
+      );
+
+    // Parse "YYYY-MM-DD" as a local date
+    const formatDate = (value, options) => {
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || '');
+      if (!match) return '';
+      return new Date(+match[1], +match[2] - 1, +match[3]).toLocaleDateString(undefined, options);
+    };
+
+    // Return the indicator to show for a line item, or null
+    const indicator = (record, line) => {
+      if (!line) return null;
+
+      const delivery = line.delivery || {};
+
+      if (delivery.delivered) {
+        const date = formatDate(delivery.delivered_date, { month: 'short', day: 'numeric' });
+        const longDate = formatDate(delivery.delivered_date, {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric'
+        });
+
+        let title = `Delivered to the plant on ${longDate}`;
+        if (delivery.delivered_by) title += ` (marked by ${delivery.delivered_by.username})`;
+        if (delivery.note) title += `\nNote: ${delivery.note}`;
+
+        return { state: 'delivered', text: date ? `Delivered · ${date}` : 'Delivered', title };
+      }
+
+      // Use the received quantity from the table, which may be newer than the delivery data
+      const received = Number(record.received) >= Number(record.quantity);
+
+      if (!received && line.order && line.order.editable) {
+        return { state: 'awaiting', text: 'Not Delivered', title: 'Not yet delivered to the plant' };
+      }
+
+      return null;
+    };
+
+    const fetchLines = (orderId) => {
+      loading = true;
+
+      const path = window.location.pathname;
+      const url = apiUrl(`/plugin/podelivery/lines/?order=${orderId}&include_received=true`);
+
+      fetch(url, { credentials: 'include', headers: { Accept: 'application/json' } })
+        .then((response) => (response.ok ? response.json() : null))
+        .catch(() => null)
+        .then((data) => {
+          const lines = {};
+          ((data && data.results) || []).forEach((line) => {
+            lines[line.pk] = line;
+          });
+
+          cache = { orderId, path, time: Date.now(), lines };
+          loading = false;
+          schedule();
+        });
+    };
+
+    const decorate = () => {
+      scheduled = false;
+
+      const match = ORDER_PATH.exec(window.location.pathname);
+      const orderId = match ? match[1] : null;
+
+      // Find the rows of the line items table for this order
+      const rows = [];
+
+      if (orderId) {
+        document.querySelectorAll('tbody tr').forEach((row) => {
+          let record = null;
+          const cells = {};
+
+          for (const cell of row.children) {
+            const info = cellInfo(cell);
+
+            if (info) {
+              record = info.record;
+              cells[info.accessor] = cell;
+            }
+          }
+
+          if (
+            record &&
+            record.pk !== undefined &&
+            'received' in record &&
+            String(record.order) === orderId
+          ) {
+            rows.push({ row, record, cells });
+          }
+        });
+      }
+
+      // Remove indicators which no longer belong to a line item row
+      const lineRows = new Set(rows.map(({ row }) => row));
+
+      document.querySelectorAll('.po-delivery-indicator').forEach((element) => {
+        if (!lineRows.has(element.closest('tr'))) element.remove();
+      });
+
+      if (rows.length === 0) return;
+
+      // Fetch the delivery data if missing, stale, or the tab has changed
+      const stale =
+        cache.orderId !== orderId ||
+        cache.path !== window.location.pathname ||
+        Date.now() - cache.time > MAX_AGE;
+
+      if (stale && !loading) fetchLines(orderId);
+
+      if (cache.orderId !== orderId || !cache.lines) return;
+
+      rows.forEach(({ row, record, cells }) => {
+        const target = COLUMNS.map((column) => cells[column]).find(Boolean);
+        const info = indicator(record, cache.lines[record.pk]);
+        const key = info ? [record.pk, info.state, info.text, info.title].join('|') : null;
+
+        let current = row.querySelector('.po-delivery-indicator');
+
+        if (current && (!info || current.dataset.key !== key || current.parentElement !== target)) {
+          current.remove();
+          current = null;
+        }
+
+        if (current || !info || !target) return;
+
+        const badge = document.createElement('span');
+        badge.className = 'po-delivery-badge';
+        badge.dataset.state = info.state;
+        badge.title = info.title;
+        badge.innerHTML = ICONS[info.state];
+        badge.append(info.text);
+
+        const element = document.createElement('div');
+        element.className = 'po-delivery-indicator';
+        element.dataset.key = key;
+        element.append(badge);
+
+        target.append(element);
+      });
+    };
+
+    // Decorate at most once per frame
+    const schedule = () => {
+      if (!scheduled) {
+        scheduled = true;
+        window.requestAnimationFrame(decorate);
+      }
+    };
+
+    // Re-fetch the delivery data after it is changed, or when returning to the window
+    const refresh = () => {
+      cache.time = 0;
+      schedule();
+    };
+
+    window.addEventListener('po-delivery:changed', refresh);
+    window.addEventListener('focus', refresh);
+
+    const start = () => {
+      new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
+      schedule();
+    };
+
+    if (document.body) {
+      start();
+    } else {
+      document.addEventListener('DOMContentLoaded', start);
+    }
+  })();
+</script>

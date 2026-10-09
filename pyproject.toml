@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "inventree-po-delivery"
+version = "1.1.1"
+description = "PO Delivery Plugin for InvenTree - Track physical delivery of purchase order line items, separate from stock receipt"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+authors = [
+    {name = "InvenTree PO Delivery Plugin"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Plugins",
+    "Framework :: Django",
+    "Intended Audience :: Manufacturing",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business",
+]
+keywords = ["inventree", "plugin", "purchase-order", "delivery", "receiving"]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/csmith73/inventree_po_delivery"
+Repository = "https://github.com/csmith73/inventree_po_delivery"
+
+[project.entry-points."inventree_plugins"]
+PODeliveryPlugin = "inventree_po_delivery.po_delivery_plugin:PODeliveryPlugin"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["inventree_po_delivery*"]
+
+[tool.setuptools.package-data]
+"inventree_po_delivery" = ["static/**/*", "templates/**/*"]

@@ -1,0 +1,51 @@
+import react from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
+import { viteExternalsPlugin } from "vite-plugin-externals";
+
+// External libraries provided by InvenTree at runtime
+// Only include libraries that are officially exposed by InvenTree (see src/frontend/src/window.tsx)
+// Other libraries (@mantine/hooks, @tabler/icons-react, @tanstack/react-query, @inventreedb/ui)
+// are bundled into the plugin
+const externalLibs = {
+  react: "React",
+  "react-dom": "ReactDOM",
+  "react-dom/client": "ReactDOM",
+  "@mantine/core": "MantineCore",
+  "@mantine/notifications": "MantineNotifications",
+  "@lingui/core": "LinguiCore",
+  "@lingui/react": "LinguiReact",
+};
+
+export default defineConfig({
+  plugins: [
+    react({
+      jsxRuntime: "classic",
+    }),
+    viteExternalsPlugin(externalLibs),
+  ],
+  define: {
+    // Replace process.env.NODE_ENV at build time for browser compatibility
+    'process.env.NODE_ENV': JSON.stringify('production'),
+  },
+  esbuild: {
+    jsx: "preserve",
+  },
+  build: {
+    outDir: "../inventree_po_delivery/static",
+    lib: {
+      entry: {
+        Panel: "./src/Panel.tsx",
+      },
+      formats: ["es"],
+    },
+    cssCodeSplit: true,
+    rollupOptions: {
+      output: {
+        entryFileNames: "[name].js",
+        assetFileNames: "[name].[ext]",
+      },
+    },
+    sourcemap: false,
+    minify: true,
+  },
+});

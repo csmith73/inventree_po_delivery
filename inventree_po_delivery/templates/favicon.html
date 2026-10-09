@@ -1,0 +1,44 @@
+{% comment %}
+Shared override of the core InvenTree "favicon.html" include
+(src/backend/InvenTree/templates/favicon.html), which is loaded in the <head> of
+every page. Plugins use it to add page scripts, as InvenTree has no plugin hook
+for running a script on every page.
+
+Only one copy of favicon.html is used (from the first active plugin in the
+template search path), so every plugin which overrides it ships this same file.
+It includes the page scripts of each of these plugins which is active.
+Keep the copies identical:
+  - inventree-table-select-fix: inventree_table_select_fix/templates/favicon.html
+  - inventree-po-delivery: inventree_po_delivery/templates/favicon.html
+  - inventree-mobile-access: inventree_mobile_access/templates/favicon.html
+
+The "core template" section is an unchanged copy of the core file - keep it in
+sync on InvenTree upgrades.
+{% endcomment %}
+{% load static plugin_extras %}
+{# ---- core template (begin) ---- #}
+<!-- Favicon -->
+<link rel="apple-touch-icon" sizes="57x57" href="{% static 'img/favicon/apple-icon-57x57.png' %}">
+<link rel="apple-touch-icon" sizes="60x60" href="{% static 'img/favicon/apple-icon-60x60.png' %}">
+<link rel="apple-touch-icon" sizes="72x72" href="{% static 'img/favicon/apple-icon-72x72.png' %}">
+<link rel="apple-touch-icon" sizes="76x76" href="{% static 'img/favicon/apple-icon-76x76.png' %}">
+<link rel="apple-touch-icon" sizes="114x114" href="{% static 'img/favicon/apple-icon-114x114.png' %}">
+<link rel="apple-touch-icon" sizes="120x120" href="{% static 'img/favicon/apple-icon-120x120.png' %}">
+<link rel="apple-touch-icon" sizes="144x144" href="{% static 'img/favicon/apple-icon-144x144.png' %}">
+<link rel="apple-touch-icon" sizes="152x152" href="{% static 'img/favicon/apple-icon-152x152.png' %}">
+<link rel="apple-touch-icon" sizes="180x180" href="{% static 'img/favicon/apple-icon-180x180.png' %}">
+<link rel="icon" type="image/png" sizes="192x192"  href="{% static 'img/favicon/android-icon-192x192.png' %}">
+<link rel="icon" type="image/png" sizes="32x32" href="{% static 'img/favicon/favicon-32x32.png' %}">
+<link rel="icon" type="image/png" sizes="96x96" href="{% static 'img/favicon/favicon-96x96.png' %}">
+<link rel="icon" type="image/png" sizes="16x16" href="{% static 'img/favicon/favicon-16x16.png' %}">
+<link rel="manifest" href="{% static 'img/favicon/manifest.json' %}">
+<meta name="msapplication-TileColor" content="#ffffff">
+<meta name="msapplication-TileImage" content="{% static 'img/favicon/ms-icon-144x144.png' %}">
+<meta name="theme-color" content="#ffffff">
+{# ---- core template (end) ---- #}
+
+{# Page scripts of active plugins #}
+{% plugin_list as active_plugins %}
+{% if "tableselectfix" in active_plugins %}{% include "table_select_fix/selection_fix.html" %}{% endif %}
+{% if "podelivery" in active_plugins %}{% include "po_delivery/line_items.html" %}{% endif %}
+{% if "mobileaccess" in active_plugins %}{% include "mobile_access/allow_mobile.html" %}{% endif %}

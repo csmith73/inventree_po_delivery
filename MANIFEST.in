@@ -1,0 +1,4 @@
+include LICENSE
+include README.md
+recursive-include inventree_po_delivery/static *
+recursive-include inventree_po_delivery/templates *
