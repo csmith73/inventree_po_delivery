@@ -120,7 +120,7 @@ Delivery state can only be changed for orders which are **Placed** or **On Hold*
 5. Ensure that **Enable URL integration**, **Enable interface integration** and **Enable event integration** are enabled in the plugin settings
 6. Restart InvenTree (required for the Line Items table badges)
 
-If you also use `inventree-table-select-fix`, update it to version 1.0.1 or later, which shares the `favicon.html` override with this plugin (see [Line Items table badges](#line-items-table-badges)).
+If you also use `inventree-table-select-fix` (1.0.1 or later) or `inventree-mobile-access`, keep them up to date: they share the `favicon.html` override with this plugin (see [Line Items table badges](#line-items-table-badges)).
 
 ### Via plugins.txt
 
