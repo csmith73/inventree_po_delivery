@@ -1,7 +1,7 @@
 // Detail Link Component - link to an InvenTree page (ctrl / middle click opens a new tab)
 
 import React from "react";
-import { Anchor } from "@mantine/core";
+import { Anchor, Text } from "@mantine/core";
 import {
   getBaseUrl,
   navigateToLink,
@@ -13,9 +13,36 @@ interface DetailLinkProps {
   path: string;
   children: React.ReactNode;
   fw?: number;
+  // Shown as plain text if the user cannot open the page
+  enabled?: boolean;
+  // Open within the plugin instead of navigating to the InvenTree page
+  onOpen?: () => void;
 }
 
-export function DetailLink({ context, path, children, fw }: DetailLinkProps) {
+export function DetailLink({
+  context,
+  path,
+  children,
+  fw,
+  enabled = true,
+  onOpen,
+}: DetailLinkProps) {
+  if (onOpen) {
+    return (
+      <Anchor component="button" type="button" size="sm" fw={fw} onClick={onOpen}>
+        {children}
+      </Anchor>
+    );
+  }
+
+  if (!enabled) {
+    return (
+      <Text size="sm" fw={fw}>
+        {children}
+      </Text>
+    );
+  }
+
   return (
     <Anchor
       href={`/${getBaseUrl()}${path}`}

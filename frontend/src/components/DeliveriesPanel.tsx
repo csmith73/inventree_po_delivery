@@ -9,7 +9,9 @@ import type { InvenTreePluginContext } from "@inventreedb/ui";
 import { errorMessage, useDeliveryLines, useSetDelivered } from "../api";
 import type {
   DeliveredFilter,
+  LinkPermissions,
   PanelContext,
+  PanelMode,
   SortColumn,
   SortState,
   UpdateDelivery,
@@ -20,16 +22,40 @@ import { DeliveryTable } from "./DeliveryTable";
 import { SummaryBadges } from "./SummaryBadges";
 import { Toolbar } from "./Toolbar";
 
+// Links to InvenTree pages, if the API does not say otherwise
+const ALL_LINKS: LinkPermissions = {
+  order: true,
+  supplier: true,
+  part: true,
+  supplier_part: true,
+};
+
+interface DeliveriesPanelProps {
+  context: InvenTreePluginContext;
+  // Used by the Deliveries page, in place of the panel context
+  mode?: PanelMode;
+  orderId?: number;
+  editable?: boolean;
+  // Open an order within the Deliveries page (instead of the PO page)
+  onOpenOrder?: (pk: number) => void;
+}
+
 export function DeliveriesPanel({
   context,
-}: {
-  context: InvenTreePluginContext;
-}) {
+  mode: modeProp,
+  orderId: orderIdProp,
+  editable,
+  onOpenOrder,
+}: DeliveriesPanelProps) {
   const panel = (context.context ?? {}) as PanelContext;
-  const mode = panel.mode === "order" ? "order" : "index";
+  const mode: PanelMode =
+    modeProp ?? (panel.mode === "order" ? "order" : "index");
   const orderId =
-    mode === "order" ? Number(panel.order_id ?? context.id) : undefined;
-  const orderEditable = mode === "index" || panel.editable !== false;
+    mode === "order"
+      ? Number(orderIdProp ?? panel.order_id ?? context.id)
+      : undefined;
+  const orderEditable =
+    mode === "index" || (editable ?? panel.editable) !== false;
 
   // Filter state (persisted per panel type)
   const storageKey = `po-delivery-${mode}`;
@@ -69,6 +95,7 @@ export function DeliveriesPanel({
   const { mutateAsync } = useSetDelivered(context);
 
   const canEdit = !!data?.can_edit;
+  const links = data?.links ?? ALL_LINKS;
   const today = data?.today ?? new Date().toISOString().slice(0, 10);
   const allRows = data?.results ?? [];
 
@@ -310,6 +337,7 @@ export function DeliveriesPanel({
           context={context}
           today={today}
           canEdit={canEdit}
+          links={links}
           sort={sort}
           onSort={onSort}
           selected={selected}
@@ -317,6 +345,7 @@ export function DeliveriesPanel({
           onSelectAll={onSelectAll}
           busy={busy}
           onUpdate={updateDelivery}
+          onOpenOrder={onOpenOrder}
         />
       )}
     </Stack>

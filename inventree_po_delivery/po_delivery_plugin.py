@@ -18,6 +18,9 @@ ORDER_EVENTS = {
     'order_purchaseorderlineitem.created',  # Line item added to the order
 }
 
+# Key of the "Deliveries" panel on the System Overview page (part of its URL)
+DELIVERY_PAGE_KEY = 'deliveries'
+
 
 class PODeliveryPlugin(
     EventMixin, SettingsMixin, UrlsMixin, UserInterfaceMixin, InvenTreePlugin
@@ -35,7 +38,7 @@ class PODeliveryPlugin(
     SLUG = 'podelivery'
     TITLE = 'PO Delivery Tracking'
     DESCRIPTION = 'Track physical delivery of purchase order line items, separate from stock receipt'
-    VERSION = '1.1.1'
+    VERSION = '1.2.0'
     AUTHOR = 'InvenTree PO Delivery Plugin'
 
     # Minimum InvenTree version required (frontend is built against Mantine 9)
@@ -48,6 +51,12 @@ class PODeliveryPlugin(
             'description': 'Show "Partially Delivered" / "Delivered" as the status of placed purchase orders',
             'validator': bool,
             'default': True,
+        },
+        'DELIVERY_GROUP': {
+            'name': 'Delivery Group',
+            'description': 'Members of this group can view all purchase orders and line items (without pricing) and change delivery state, without any Purchase Orders role',
+            'model': 'auth.group',
+            'default': '',
         },
     }
 
@@ -65,6 +74,11 @@ class PODeliveryPlugin(
                 'lines/',
                 api.DeliveryLineListView.as_view(),
                 name='delivery-lines',
+            ),
+            path(
+                'orders/',
+                api.OrderListView.as_view(),
+                name='delivery-orders',
             ),
         ]
 
@@ -103,11 +117,30 @@ class PODeliveryPlugin(
 
         user = getattr(request, 'user', None)
 
-        if not user or not user.has_perm(helpers.PERM_VIEW):
+        if not user or not helpers.can_view(user):
             return []
 
-        can_edit = user.has_perm(helpers.PERM_CHANGE)
+        can_edit = helpers.can_edit(user)
         target_model = context.get('target_model', None)
+
+        # System Overview page (needs no InvenTree role) - for the Delivery Group
+        if target_model == 'core':
+            if not helpers.in_delivery_group(user):
+                return []
+
+            return [
+                {
+                    'key': DELIVERY_PAGE_KEY,
+                    'title': _('Deliveries'),
+                    'description': _('Purchase orders and deliveries'),
+                    'icon': 'ti:truck-delivery:outline',
+                    'source': self.plugin_static_file('Panel.js:renderDeliveryPage'),
+                    'context': {
+                        'mode': 'page',
+                        'can_edit': can_edit,
+                    },
+                }
+            ]
 
         # Purchasing index page (panel is requested without a target_id)
         if target_model == 'purchasing':
@@ -160,3 +193,26 @@ class PODeliveryPlugin(
             ]
 
         return []
+
+    def get_ui_navigation_items(self, request, context, **kwargs):
+        """Add a "Deliveries" tab to the main menu for the Delivery Group.
+
+        Members of the group may have no Purchase Orders role (and so no
+        Purchasing tab): the tab opens the "Deliveries" panel on the System
+        Overview page.
+        """
+        from . import helpers
+
+        user = getattr(request, 'user', None)
+
+        if not user or not helpers.in_delivery_group(user):
+            return []
+
+        return [
+            {
+                'key': DELIVERY_PAGE_KEY,
+                'title': _('Deliveries'),
+                'icon': 'ti:truck-delivery:outline',
+                'options': {'url': f'/core/index/{DELIVERY_PAGE_KEY}'},
+            }
+        ]

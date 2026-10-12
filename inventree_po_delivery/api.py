@@ -4,7 +4,7 @@ from datetime import date
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Q
 from django.utils import timezone
 
 from rest_framework import status
@@ -42,7 +42,7 @@ class DeliveryLineListView(APIView):
 
     def get(self, request):
         """Return the list of line items."""
-        if not request.user.has_perm(helpers.PERM_VIEW):
+        if not helpers.can_view(request.user):
             return error_response('Permission denied', status.HTTP_403_FORBIDDEN)
 
         order_id = request.query_params.get('order', None)
@@ -99,9 +99,82 @@ class DeliveryLineListView(APIView):
 
         return Response({
             'today': today.isoformat(),
-            'can_edit': request.user.has_perm(helpers.PERM_CHANGE),
+            'can_edit': helpers.can_edit(request.user),
+            'links': helpers.link_permissions(request.user),
             'summary': summary,
             'results': results,
+        })
+
+
+class OrderListView(APIView):
+    """List purchase orders along with their delivery progress.
+
+    No pricing information is included: the list is also available to members
+    of the "Delivery Group", who may not be able to view purchase orders.
+
+    Query parameters:
+        order: Return a single order (any status, other parameters are ignored)
+        status: open (default), awaiting, complete, failed or all
+        search: Search the reference, description, supplier and supplier reference
+
+    At most MAX_ORDERS orders are returned (newest first). "count" is the total
+    number of matching orders.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """Return the list of orders."""
+        if not helpers.can_view(request.user):
+            return error_response('Permission denied', status.HTTP_403_FORBIDDEN)
+
+        order_id = request.query_params.get('order', None)
+        status_filter = request.query_params.get('status', None) or 'open'
+
+        if status_filter not in helpers.ORDER_STATUS_FILTERS:
+            return error_response('Invalid status filter')
+
+        queryset = PurchaseOrder.objects.select_related('supplier', 'destination')
+
+        if order_id not in (None, ''):
+            try:
+                queryset = queryset.filter(pk=int(order_id))
+            except (TypeError, ValueError):
+                return error_response('Invalid order ID')
+        else:
+            statuses = helpers.order_status_filter(status_filter)
+
+            if statuses is not None:
+                queryset = queryset.filter(status__in=statuses)
+
+            search = str(request.query_params.get('search', None) or '').strip()
+
+            if search:
+                queryset = queryset.filter(
+                    Q(reference__icontains=search)
+                    | Q(description__icontains=search)
+                    | Q(supplier__name__icontains=search)
+                    | Q(supplier_reference__icontains=search)
+                )
+
+        count = queryset.count()
+
+        queryset = queryset.prefetch_related('lines').order_by(
+            '-reference_int', '-reference', '-pk'
+        )[: helpers.MAX_ORDERS]
+
+        smap = helpers.status_map()
+        today = current_date()
+
+        return Response({
+            'today': today.isoformat(),
+            'can_edit': helpers.can_edit(request.user),
+            'links': helpers.link_permissions(request.user),
+            'count': count,
+            'results': [
+                helpers.serialize_order(order, smap=smap, today=today)
+                for order in queryset
+            ],
         })
 
 
@@ -122,7 +195,7 @@ class SetDeliveredView(APIView):
 
     def post(self, request):
         """Update the delivery state."""
-        if not request.user.has_perm(helpers.PERM_CHANGE):
+        if not helpers.can_edit(request.user):
             return error_response('Permission denied', status.HTTP_403_FORBIDDEN)
 
         data = request.data

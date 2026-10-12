@@ -10,6 +10,7 @@ import {
 import type { InvenTreePluginContext } from "@inventreedb/ui";
 import type {
   DeliveryLine,
+  LinkPermissions,
   PanelMode,
   SortColumn,
   SortState,
@@ -52,6 +53,7 @@ interface DeliveryTableProps {
   context: InvenTreePluginContext;
   today: string;
   canEdit: boolean;
+  links: LinkPermissions;
   sort: SortState;
   onSort: (column: SortColumn) => void;
   selected: Set<number>;
@@ -59,6 +61,7 @@ interface DeliveryTableProps {
   onSelectAll: (selected: boolean) => void;
   busy: Set<number>;
   onUpdate: UpdateDelivery;
+  onOpenOrder?: (pk: number) => void;
 }
 
 export function DeliveryTable({
@@ -67,6 +70,7 @@ export function DeliveryTable({
   context,
   today,
   canEdit,
+  links,
   sort,
   onSort,
   selected,
@@ -74,6 +78,7 @@ export function DeliveryTable({
   onSelectAll,
   busy,
   onUpdate,
+  onOpenOrder,
 }: DeliveryTableProps) {
   const selectable = rows.filter((row) => row.order.editable);
   const selectedCount = selectable.filter((row) => selected.has(row.pk)).length;
@@ -123,10 +128,12 @@ export function DeliveryTable({
               context={context}
               today={today}
               canEdit={canEdit}
+              links={links}
               selected={selected.has(row.pk)}
               busy={busy.has(row.pk)}
               onSelect={onSelect}
               onUpdate={onUpdate}
+              onOpenOrder={onOpenOrder}
             />
           ))}
         </Table.Tbody>

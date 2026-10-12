@@ -4,6 +4,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import type { InvenTreePluginContext } from "@inventreedb/ui";
 import type {
   DeliveryLinesResponse,
+  OrderQuery,
+  OrdersResponse,
   SetDeliveredRequest,
   SetDeliveredResponse,
 } from "./types";
@@ -43,6 +45,38 @@ export function useDeliveryLines(
         return response.data;
       },
       // Receiving terminals may be left open - keep the data fresh
+      refetchInterval: 60_000,
+      refetchOnWindowFocus: true,
+    },
+    context.queryClient
+  );
+}
+
+// Fetch purchase orders along with their delivery progress
+export function useOrders(context: InvenTreePluginContext, query: OrderQuery) {
+  return useQuery<OrdersResponse>(
+    {
+      queryKey: [...QUERY_KEY, "orders", query],
+      queryFn: async () => {
+        const params: Record<string, string | number> = {};
+
+        if (query.order) {
+          params.order = query.order;
+        } else {
+          params.status = query.status ?? "open";
+
+          if (query.search) {
+            params.search = query.search;
+          }
+        }
+
+        const response = await context.api.get(`${API_BASE}/orders/`, {
+          params,
+        });
+        return response.data;
+      },
+      // Keep showing the list while a new search loads (not for a single order)
+      placeholderData: query.order ? undefined : (previous) => previous,
       refetchInterval: 60_000,
       refetchOnWindowFocus: true,
     },

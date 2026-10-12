@@ -26,6 +26,7 @@ A plugin for [InvenTree](https://inventree.org) that tracks whether purchase ord
   - **Placed** → **Partially Delivered** (at least one line delivered) → **Delivered** (every line delivered)
   - A line counts as delivered if it is marked delivered, or has been fully received. Extra line items (e.g. shipping) are not counted
 - **Delivered / Not Delivered badges** in the built-in **Line Items** table of each purchase order (below the Received progress bar)
+- **Delivery-only logins** (optional): members of the **Delivery Group** can see all purchase orders and line items, **without any pricing**, and change delivery state - without being able to edit purchase orders (see [Delivery-only logins](#delivery-only-logins))
 
 ## How the data is stored
 
@@ -95,17 +96,39 @@ diff <(sed -n '/core template (begin)/,/core template (end)/{//!p}' inventree_po
 | Setting | Description | Default |
 |---------|-------------|---------|
 | Show Delivery Status on Orders | Show "Partially Delivered" / "Delivered" as the status of placed purchase orders | On |
+| Delivery Group | Members of this group can view all purchase orders and line items (without pricing) and change delivery state, without any Purchase Orders role | (none) |
 
 ## Permissions
 
-Permissions follow the InvenTree **Purchase Orders** role:
+Permissions follow the InvenTree **Purchase Orders** role, or membership of the **Delivery Group** (plugin setting):
 
 | Action | Required role |
 |--------|---------------|
-| View the tab / panel | Purchase Orders - View |
-| Change delivery state | Purchase Orders - Change |
+| View the tab / panel | Purchase Orders - View, or Delivery Group |
+| Change delivery state | Purchase Orders - Change, or Delivery Group |
 
 Delivery state can only be changed for orders which are **Placed** or **On Hold**.
+
+### Delivery-only logins
+
+InvenTree permissions apply to whole tables: anyone who can view purchase orders can also see their prices (order total, unit prices, supplier price breaks, the PO report, CSV export), and anyone who can change them can edit every field. To give a login (e.g. a receiving terminal) access to deliveries only:
+
+1. **Admin Center → Users → Groups**: add a group (e.g. **Receiving**) and leave **all roles unchecked**.
+2. Edit the user: make them a member of **only** that group, and make sure they are not **staff** or **superuser**.
+3. **Admin Center → Plugins → PO Delivery Tracking**: set **Delivery Group** to that group. **Enable interface integration** must be on.
+4. Log in as the user: a **Deliveries** tab appears in the main menu. It opens a page with two views:
+   - **Pending Deliveries** - the same list as the Purchasing page
+   - **Purchase Orders** - every purchase order (filter by status, search), with delivered / received progress. Click an order to see its details and all of its line items, and to change their delivery state.
+
+Members of the group:
+
+- Can change delivery state (Placed / On Hold orders), even without the Purchase Orders - Change role.
+- See the purchase orders and line items through the plugin only. The plugin API never returns prices, currencies or costs (order totals, unit prices and extra lines such as shipping are left out).
+- Cannot open the InvenTree Purchasing, purchase order, supplier or part pages (unless they have the roles for them): these are shown as plain text instead of links.
+
+> **Do not give the group any role that shows prices**: Purchase Orders, Part, BOM, Build Orders, Stock Items, Sales Orders or Return Orders. Each of these makes some prices visible in InvenTree (e.g. part pricing, stock item purchase price). A user also gets the roles of every other group they are a member of.
+
+The **Deliveries** page is a panel on InvenTree's **System Overview** page (`/core/index/deliveries`), which every logged-in user can open. The other tabs on that page (Users, Groups, Contacts) do not show prices; Contacts is empty without a Purchase Orders / Sales Orders role.
 
 ## Installation
 
@@ -159,7 +182,7 @@ python manage.py collectplugins
 
 ## API Endpoints
 
-All endpoints are mounted under `/plugin/podelivery/`.
+All endpoints are mounted under `/plugin/podelivery/`. None of them return pricing information.
 
 ### `GET lines/`
 
@@ -174,6 +197,7 @@ Without `order`, returns all lines not fully received on Placed / On Hold orders
 {
   "today": "2026-10-07",
   "can_edit": true,
+  "links": {"order": true, "supplier": true, "part": true, "supplier_part": true},
   "summary": {"total": 13, "awaiting_delivery": 12, "delivered": 1, "overdue": 8},
   "results": [
     {
@@ -196,6 +220,49 @@ Without `order`, returns all lines not fully received on Placed / On Hold orders
   ]
 }
 ```
+
+`links` says which InvenTree pages the user can open (purchase order, supplier, part, supplier part).
+
+### `GET orders/`
+
+| Query parameter | Description |
+|-----------------|-------------|
+| `order` | Return a single order (any status) - the other parameters are ignored |
+| `status` | `open` (default: Pending, Placed, On Hold), `awaiting` (Placed, On Hold), `complete`, `failed` (Cancelled, Lost, Returned) or `all` |
+| `search` | Search the reference, description, supplier name and supplier reference |
+
+Returns the newest 250 matching orders (`count` is the total number of matches):
+
+```json
+{
+  "today": "2026-10-07",
+  "can_edit": true,
+  "links": {"order": false, "supplier": false, "part": false, "supplier_part": false},
+  "count": 1,
+  "results": [
+    {
+      "pk": 3,
+      "reference": "PO0003",
+      "description": "...",
+      "supplier": {"pk": 1, "name": "DigiKey"},
+      "supplier_reference": "SO-4471",
+      "creation_date": "2026-09-30",
+      "issue_date": "2026-10-01",
+      "target_date": "2026-10-10",
+      "complete_date": null,
+      "destination": null,
+      "editable": true,
+      "status": 20,
+      "status_label": "Partially Delivered",
+      "...": "...",
+      "lines": {"total": 5, "received": 1, "delivered": 2, "overdue": 0},
+      "overdue": false
+    }
+  ]
+}
+```
+
+A line counts as delivered if it is marked delivered, or fully received. Overdue lines (target date passed, not delivered) are only counted on open orders.
 
 ### `POST lines/set-delivered/`
 

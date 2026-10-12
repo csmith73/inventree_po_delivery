@@ -20,7 +20,7 @@ metadata when an order is duplicated, so a record whose "line" does not match
 the line item it is stored on is ignored.
 """
 
-from order.status_codes import PurchaseOrderStatus
+from order.status_codes import PurchaseOrderStatus, PurchaseOrderStatusGroups
 
 # Metadata key used by the plugin
 METADATA_KEY = 'po_delivery'
@@ -35,9 +35,24 @@ MAX_BULK = 500
 NOTE_MAX_LENGTH = 250
 
 # Permissions required to view / change delivery state
-# (both are granted by the "purchase_order" role)
+# (both are granted by the "purchase_order" role). Members of the "Delivery
+# Group" (plugin setting) can view and change delivery state without them.
 PERM_VIEW = 'order.view_purchaseorderlineitem'
 PERM_CHANGE = 'order.change_purchaseorderlineitem'
+
+# Permissions required to open the InvenTree page linked from each column
+LINK_PERMS = {
+    'order': 'order.view_purchaseorder',
+    'supplier': 'company.view_company',
+    'part': 'part.view_part',
+    'supplier_part': 'company.view_supplierpart',
+}
+
+# Maximum number of orders returned by the order list
+MAX_ORDERS = 250
+
+# Order list status filters (see order_status_filter)
+ORDER_STATUS_FILTERS = ('open', 'awaiting', 'complete', 'failed', 'all')
 
 # Custom PurchaseOrder states, shown in place of "Placed" once lines are delivered.
 # The states are created automatically (if missing) and can be edited by an
@@ -65,6 +80,66 @@ def panel_statuses():
     Completed orders are shown (read-only) as a delivery history.
     """
     return editable_statuses() | {PurchaseOrderStatus.COMPLETE.value}
+
+
+def order_status_filter(name):
+    """Return the order statuses for an order list filter (None = all orders)."""
+    return {
+        'open': set(PurchaseOrderStatusGroups.OPEN),
+        'awaiting': editable_statuses(),
+        'complete': {PurchaseOrderStatus.COMPLETE.value},
+        'failed': set(PurchaseOrderStatusGroups.FAILED),
+        'all': None,
+    }[name]
+
+
+def get_plugin():
+    """Return the (active) plugin instance, or None."""
+    from plugin import registry
+
+    return registry.get_plugin('podelivery')
+
+
+def delivery_group_id():
+    """Return the pk of the "Delivery Group" (plugin setting), or None."""
+    plugin = get_plugin()
+
+    if not plugin:
+        return None
+
+    try:
+        return int(plugin.get_setting('DELIVERY_GROUP', backup_value=''))
+    except (TypeError, ValueError):
+        return None
+
+
+def in_delivery_group(user) -> bool:
+    """Return True if the user is a member of the "Delivery Group"."""
+    group_id = delivery_group_id()
+
+    if not group_id or not user or not user.is_authenticated:
+        return False
+
+    return user.groups.filter(pk=group_id).exists()
+
+
+def can_view(user) -> bool:
+    """Return True if the user can view delivery state (and the line items)."""
+    return user.has_perm(PERM_VIEW) or in_delivery_group(user)
+
+
+def can_edit(user) -> bool:
+    """Return True if the user can change delivery state."""
+    return user.has_perm(PERM_CHANGE) or in_delivery_group(user)
+
+
+def link_permissions(user) -> dict:
+    """Return which linked InvenTree pages the user can open.
+
+    Members of the "Delivery Group" may have no InvenTree roles at all, in which
+    case the frontend shows plain text instead of links to pages they cannot open.
+    """
+    return {key: user.has_perm(perm) for key, perm in LINK_PERMS.items()}
 
 
 def get_delivery(line) -> dict:
@@ -183,6 +258,23 @@ def _date(value):
     return value.isoformat() if value else None
 
 
+def line_target_date(line):
+    """Return the effective target date of a line item, and where it comes from.
+
+    The line target date is used, falling back to the order target date.
+
+    Returns:
+        Tuple of (date or None, 'line' / 'order' / None)
+    """
+    if line.target_date:
+        return line.target_date, 'line'
+
+    if line.order.target_date:
+        return line.order.target_date, 'order'
+
+    return None, None
+
+
 def serialize_line(line, *, smap, today) -> dict:
     """Serialize a PurchaseOrderLineItem for the delivery table.
 
@@ -197,14 +289,7 @@ def serialize_line(line, *, smap, today) -> dict:
 
     delivery = delivery_info(line)
     fully_received = line.received >= line.quantity
-
-    # Effective target date: line target date, falling back to the order target date
-    if line.target_date:
-        target_date, target_date_source = line.target_date, 'line'
-    elif order.target_date:
-        target_date, target_date_source = order.target_date, 'order'
-    else:
-        target_date, target_date_source = None, None
+    target_date, target_date_source = line_target_date(line)
 
     # Delivery is overdue if the target date has passed and it has not arrived
     overdue = bool(
@@ -259,6 +344,65 @@ def serialize_line(line, *, smap, today) -> dict:
         if destination
         else None,
         'delivery': delivery,
+    }
+
+
+def serialize_order(order, *, smap, today) -> dict:
+    """Serialize a PurchaseOrder for the order list.
+
+    Pricing information (total price, currency) is deliberately not included,
+    as the order list is available to users who cannot view purchase orders.
+
+    The order must have been fetched with the supplier / destination selected,
+    and the line items prefetched.
+    """
+    lines = list(order.lines.all())
+    supplier = order.supplier
+    destination = order.destination
+    is_open = order.status in PurchaseOrderStatusGroups.OPEN
+
+    received = 0
+    delivered = 0
+    overdue = 0
+
+    for line in lines:
+        line.order = order  # Avoid a query per line in line_target_date()
+
+        line_delivered = is_line_delivered(line)
+        target_date, _source = line_target_date(line)
+
+        received += line.received >= line.quantity
+        delivered += line_delivered
+
+        if is_open and target_date and target_date < today and not line_delivered:
+            overdue += 1
+
+    return {
+        'pk': order.pk,
+        'reference': order.reference,
+        'description': order.description,
+        'supplier': {'pk': supplier.pk, 'name': supplier.name} if supplier else None,
+        'supplier_reference': order.supplier_reference,
+        'creation_date': _date(order.creation_date),
+        'issue_date': _date(order.issue_date),
+        'target_date': _date(order.target_date),
+        'complete_date': _date(order.complete_date),
+        'destination': {
+            'pk': destination.pk,
+            'name': destination.name,
+            'pathstring': destination.pathstring,
+        }
+        if destination
+        else None,
+        'editable': order.status in editable_statuses(),
+        **order_status(order, smap),
+        'lines': {
+            'total': len(lines),
+            'received': received,
+            'delivered': delivered,
+            'overdue': overdue,
+        },
+        'overdue': overdue > 0,
     }
 
 
@@ -348,9 +492,7 @@ def order_delivery_state(order):
 
 def order_status_enabled() -> bool:
     """Return True if the plugin should set the delivery status on orders."""
-    from plugin import registry
-
-    plugin = registry.get_plugin('podelivery')
+    plugin = get_plugin()
 
     return bool(plugin and plugin.get_setting('UPDATE_ORDER_STATUS', backup_value=True))
 

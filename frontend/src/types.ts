@@ -1,10 +1,12 @@
 // Type definitions for the PO Delivery plugin
 
+// Delivery table modes: all pending lines, or the lines of a single order
 export type PanelMode = "index" | "order";
 
-// Context provided by the plugin backend (get_ui_panels)
+// Context provided by the plugin backend (get_ui_panels).
+// "page" is the Deliveries page (System Overview) for the Delivery Group.
 export interface PanelContext {
-  mode: PanelMode;
+  mode: PanelMode | "page";
   can_edit: boolean;
   order_id?: number;
   editable?: boolean;
@@ -70,9 +72,18 @@ export interface DeliverySummary {
   overdue: number;
 }
 
+// Which InvenTree pages the user can open (links are shown as plain text otherwise)
+export interface LinkPermissions {
+  order: boolean;
+  supplier: boolean;
+  part: boolean;
+  supplier_part: boolean;
+}
+
 export interface DeliveryLinesResponse {
   today: string;
   can_edit: boolean;
+  links: LinkPermissions;
   summary: DeliverySummary;
   results: DeliveryLine[];
 }
@@ -120,3 +131,50 @@ export type UpdateDelivery = (
   request: SetDeliveredRequest,
   successMessage?: string
 ) => Promise<boolean>;
+
+export type OrderStatusFilter =
+  | "open"
+  | "awaiting"
+  | "complete"
+  | "failed"
+  | "all";
+
+// Purchase order in the order list (no pricing information)
+export interface OrderSummary {
+  pk: number;
+  reference: string;
+  description: string;
+  supplier: { pk: number; name: string } | null;
+  supplier_reference: string;
+  creation_date: string | null;
+  issue_date: string | null;
+  target_date: string | null;
+  complete_date: string | null;
+  destination: { pk: number; name: string; pathstring: string } | null;
+  editable: boolean;
+  status: number;
+  status_custom_key: number | null;
+  status_label: string;
+  status_color: string;
+  lines: {
+    total: number;
+    received: number;
+    delivered: number;
+    overdue: number;
+  };
+  overdue: boolean;
+}
+
+export interface OrdersResponse {
+  today: string;
+  can_edit: boolean;
+  links: LinkPermissions;
+  count: number;
+  results: OrderSummary[];
+}
+
+export interface OrderQuery {
+  order?: number;
+  status?: OrderStatusFilter;
+  search?: string;
+}

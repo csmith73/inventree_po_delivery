@@ -13,7 +13,12 @@ import {
 } from "@mantine/core";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import type { InvenTreePluginContext } from "@inventreedb/ui";
-import type { DeliveryLine, PanelMode, UpdateDelivery } from "../types";
+import type {
+  DeliveryLine,
+  LinkPermissions,
+  PanelMode,
+  UpdateDelivery,
+} from "../types";
 import { formatDate, formatQuantity, statusColor } from "../utils";
 import { DeliveredToggle } from "./DeliveredToggle";
 import { DetailLink } from "./DetailLink";
@@ -24,10 +29,12 @@ interface DeliveryRowProps {
   context: InvenTreePluginContext;
   today: string;
   canEdit: boolean;
+  links: LinkPermissions;
   selected: boolean;
   busy: boolean;
   onSelect: (pk: number, selected: boolean) => void;
   onUpdate: UpdateDelivery;
+  onOpenOrder?: (pk: number) => void;
 }
 
 // Theme-aware row tint
@@ -49,10 +56,12 @@ export function DeliveryRow({
   context,
   today,
   canEdit,
+  links,
   selected,
   busy,
   onSelect,
   onUpdate,
+  onOpenOrder,
 }: DeliveryRowProps) {
   const progress =
     row.quantity > 0 ? Math.min(100, (row.received / row.quantity) * 100) : 0;
@@ -85,6 +94,8 @@ export function DeliveryRow({
               context={context}
               path={`/purchasing/purchase-order/${row.order.pk}/`}
               fw={600}
+              enabled={links.order}
+              onOpen={onOpenOrder && (() => onOpenOrder(row.order.pk))}
             >
               {row.order.reference}
             </DetailLink>
@@ -114,6 +125,7 @@ export function DeliveryRow({
               <DetailLink
                 context={context}
                 path={`/purchasing/supplier/${row.supplier.pk}/`}
+                enabled={links.supplier}
               >
                 {row.supplier.name}
               </DetailLink>
@@ -137,6 +149,7 @@ export function DeliveryRow({
               context={context}
               path={`/part/${row.part.pk}/`}
               fw={600}
+              enabled={links.part}
             >
               {row.part.IPN || row.part.name}
             </DetailLink>
@@ -163,6 +176,7 @@ export function DeliveryRow({
             <DetailLink
               context={context}
               path={`/purchasing/supplier-part/${row.supplier_part.pk}/`}
+              enabled={links.supplier_part}
             >
               {row.supplier_part.SKU}
             </DetailLink>
